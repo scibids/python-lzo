@@ -1,4 +1,4 @@
-
+import os
 import struct
 import io
 import builtins
@@ -170,6 +170,7 @@ class LzoFile(io.BufferedIOBase):
             elif buf_read + len(block) == size:
                 buf_read += len(block)
                 result.append(block)
+                self._clear_buf()
                 break
 
             else:
@@ -250,7 +251,7 @@ class LzoFile(io.BufferedIOBase):
     def _read_block(self):
         dst_len = self._read32()
 
-        if dst_len == 0:
+        if dst_len is None or dst_len == 0:
             return None
 
         if dst_len > MAX_BLOCK_SIZE:
@@ -313,7 +314,10 @@ class LzoFile(io.BufferedIOBase):
         return ord(self._read_c(1))
 
     def _read32(self):
-        return struct.unpack(">I", self.fileobj.read(4))[0]
+        obj = self.fileobj.read(4)
+        if len(obj) == 0:
+            return None
+        return struct.unpack(">I", obj)[0]
 
     def _read16(self):
         return struct.unpack(">H", self.fileobj.read(2))[0]
@@ -433,9 +437,10 @@ class LzoFile(io.BufferedIOBase):
             else:
                 break
 
-        to_read = self._buf_len if size == -1 else size
+        to_read = self._buf_len if size == -1 or self._buf_len < size else size
         self.offset += to_read
-        return self._read_from_buf(to_read)
+        j = self._read_from_buf(to_read)
+        return j
 
     def write(self, content):
         bytes_write = 0
@@ -489,8 +494,11 @@ class LzoFile(io.BufferedIOBase):
         if whence:
             if whence == 1:
                 offset = self.offset + offset
-            else:
-                raise ValueError('Seek from end not supported')
+            elif whence == os.SEEK_END:
+                complete = False
+                while not complete:
+                    complete = len(self.read(1024)) == 0
+                offset = self.offset
         if self.mode == WRITE:
             if offset < self.offset:
                 raise IOError('Negative seek in write mode')
